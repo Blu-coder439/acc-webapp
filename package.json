@@ -8,11 +8,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "migrate:data:supabase": "node scripts/migrate-local-data-to-supabase.js",
+    "migrate:users:supabase": "node scripts/migrate-users-to-supabase.js",
     "test:e2e": "playwright test",
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
+    "@supabase/supabase-js": "^2.102.1",
     "@tailwindcss/vite": "^4.2.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",

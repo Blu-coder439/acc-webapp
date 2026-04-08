@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import { supabase } from '@/lib/supabase';
+import { syncAuthenticatedUser } from '@/utils/auth-session';
 
 const inputStyles = "w-full px-4 py-3 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-4 focus:ring-blue-50 focus:border-blue-600 transition-all placeholder:text-slate-300";
 const labelStyles = "block text-sm font-semibold text-slate-800 mb-1.5";
@@ -11,7 +13,6 @@ const isSubmitting = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 const router = useRouter();
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const form = ref({
   businessName: '',
@@ -43,47 +44,50 @@ const submitSignup = async () => {
   isSubmitting.value = true;
 
   try {
-    // Build payload conditionally to omit empty fields
-    const payload = {
-      accountType: accountType.value,
+    if (!supabase) {
+      throw new Error('Supabase is not configured. Add your Supabase URL and publishable key.');
+    }
+
+    const signupMetadata = accountType.value === 'business'
+      ? {
+          account_type: 'business',
+          business_name: form.value.businessName.trim(),
+          business_type: form.value.businessType
+        }
+      : {
+          account_type: 'client',
+          full_name: form.value.fullName.trim(),
+          city: form.value.city.trim(),
+          phone: form.value.phone.trim()
+        };
+
+    const { data, error } = await supabase.auth.signUp({
       email: form.value.email.trim(),
-      password: form.value.password
-    };
-
-    if (accountType.value === 'client') {
-      payload.fullName = form.value.fullName.trim();
-      payload.city = form.value.city.trim();
-      if (form.value.phone.trim()) {
-        payload.phone = form.value.phone.trim();
+      password: form.value.password,
+      options: {
+        data: signupMetadata
       }
-      // Ensure business fields are not sent for clients
-      // (businessName and businessType are not added)
-    }
-    if (accountType.value === 'business') {
-      payload.businessName = form.value.businessName.trim();
-      payload.businessType = form.value.businessType;
-      // Do not add phone for business accounts
-    }
-
-    const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Signup failed.');
+    if (error) {
+      throw error;
     }
 
-    successMessage.value = `Account created successfully. Redirecting to login...`;
+    if (data.session?.access_token) {
+      await syncAuthenticatedUser(data.session.access_token);
+      successMessage.value = 'Account created successfully. Redirecting to your dashboard...';
+
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
+      return;
+    }
+
+    successMessage.value = 'Account created. Check your email to confirm your address, then log in.';
 
     setTimeout(() => {
       router.push('/login');
-    }, 1000);
+    }, 1400);
   } catch (error) {
     errorMessage.value = error.message;
   } finally {

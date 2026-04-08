@@ -1,13 +1,18 @@
 <script setup>
 import Sidebar from '@/components/ui/admin/sidebar.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { signOutCurrentUser } from '@/utils/auth-session';
+import { convertFromUsd, fetchExchangeRates, getExchangeRate } from '@/utils/exchange-rates';
+import { formatCurrencyWithCode, getPreferredCurrency } from '@/utils/user-settings';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const router = useRouter();
 
 const isSidebarExpanded = ref(false);
 const currentUser = ref(null);
+const preferredCurrency = ref('USD');
+const exchangeRatePayload = ref(null);
 const transactions = ref([]);
 const isLoading = ref(true);
 const isSubmitting = ref(false);
@@ -72,11 +77,19 @@ const closeFormModal = () => {
 };
 
 const formatCurrency = (value) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2
-  }).format(Number(value || 0));
+  formatCurrencyWithCode(
+    convertFromUsd(value, preferredCurrency.value, exchangeRatePayload.value),
+    preferredCurrency.value
+  );
+
+const exchangeRateNote = computed(() => {
+  if (preferredCurrency.value === 'USD') {
+    return 'Showing base values in USD.';
+  }
+
+  const rate = getExchangeRate(exchangeRatePayload.value, preferredCurrency.value);
+  return `1 USD = ${formatCurrencyWithCode(rate, preferredCurrency.value)}`;
+});
 
 const formatDate = (value) => {
   if (!value) {
@@ -374,9 +387,23 @@ const handleSidebarToggle = (expanded) => {
   isSidebarExpanded.value = expanded;
 };
 
-const logout = () => {
-  localStorage.removeItem('currentUser');
+const logout = async () => {
+  await signOutCurrentUser();
   router.push('/login');
+};
+
+const loadCurrencyPreferences = async () => {
+  preferredCurrency.value = getPreferredCurrency(currentUser.value?.user_id);
+
+  try {
+    exchangeRatePayload.value = await fetchExchangeRates();
+  } catch {
+    exchangeRatePayload.value = null;
+  }
+};
+
+const handleSettingsUpdated = () => {
+  void loadCurrencyPreferences();
 };
 
 onMounted(async () => {
@@ -388,7 +415,15 @@ onMounted(async () => {
   }
 
   currentUser.value = JSON.parse(savedUser);
+  await loadCurrencyPreferences();
   await loadTransactions();
+  window.addEventListener('finflow-settings-updated', handleSettingsUpdated);
+  window.addEventListener('storage', handleSettingsUpdated);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('finflow-settings-updated', handleSettingsUpdated);
+  window.removeEventListener('storage', handleSettingsUpdated);
 });
 </script>
 
@@ -408,6 +443,9 @@ onMounted(async () => {
             <h1 class="mt-2 text-3xl font-black text-slate-900">Revenue, Expenses, Debts, and Ledger</h1>
             <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               Track incoming money, outgoing costs, customer balances, supplier obligations, and every transaction in one place.
+            </p>
+            <p class="mt-3 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+              {{ exchangeRateNote }}
             </p>
           </div>
 

@@ -1,12 +1,17 @@
 <script setup>
 import Sidebar from '@/components/ui/admin/sidebar.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { convertFromUsd, fetchExchangeRates, getExchangeRate } from '@/utils/exchange-rates';
+import { signOutCurrentUser } from '@/utils/auth-session';
+import { formatCurrencyWithCode, getPreferredCurrency } from '@/utils/user-settings';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const router = useRouter();
 
 const currentUser = ref(null);
+const preferredCurrency = ref('USD');
+const exchangeRatePayload = ref(null);
 const processes = ref([]);
 const isLoading = ref(true);
 const isSubmitting = ref(false);
@@ -18,12 +23,27 @@ const form = ref({
   status: 'pending'
 });
 
-const metricCards = [
-  { label: 'Monthly Revenue', value: '$48,200', change: '+12.4%', icon: 'trending_up', tone: 'border-emerald-100 bg-emerald-50 text-emerald-600' },
-  { label: 'Operating Expenses', value: '$18,640', change: '-3.1%', icon: 'payments', tone: 'border-rose-100 bg-rose-50 text-rose-600' },
-  { label: 'Net Profit', value: '$29,560', change: '+8.7%', icon: 'account_balance_wallet', tone: 'border-blue-100 bg-blue-50 text-blue-600' },
-  { label: 'Outstanding Invoices', value: '14', change: '$9,320 due', icon: 'receipt_long', tone: 'border-amber-100 bg-amber-50 text-amber-600' }
-];
+const formatCurrency = (value) =>
+  formatCurrencyWithCode(
+    convertFromUsd(value, preferredCurrency.value, exchangeRatePayload.value),
+    preferredCurrency.value
+  );
+
+const exchangeRateNote = computed(() => {
+  if (preferredCurrency.value === 'USD') {
+    return 'Showing base values in USD.';
+  }
+
+  const rate = getExchangeRate(exchangeRatePayload.value, preferredCurrency.value);
+  return `1 USD = ${formatCurrencyWithCode(rate, preferredCurrency.value)}`;
+});
+
+const metricCards = computed(() => [
+  { label: 'Monthly Revenue', value: formatCurrency(48200), change: '+12.4%', icon: 'trending_up', tone: 'border-emerald-100 bg-emerald-50 text-emerald-600' },
+  { label: 'Operating Expenses', value: formatCurrency(18640), change: '-3.1%', icon: 'payments', tone: 'border-rose-100 bg-rose-50 text-rose-600' },
+  { label: 'Net Profit', value: formatCurrency(29560), change: '+8.7%', icon: 'account_balance_wallet', tone: 'border-blue-100 bg-blue-50 text-blue-600' },
+  { label: 'Outstanding Invoices', value: '14', change: `${formatCurrency(9320)} due`, icon: 'receipt_long', tone: 'border-amber-100 bg-amber-50 text-amber-600' }
+]);
 
 const revenueTrend = [
   { month: 'Jan', revenue: 58, expense: 35 },
@@ -41,11 +61,11 @@ const expenseBreakdown = [
   { label: 'Tools', value: 14, color: 'bg-amber-400' }
 ];
 
-const cashflowItems = [
-  { label: 'Cash in bank', value: '$124,800', helper: 'Healthy runway for 4.2 months' },
-  { label: 'Receivables', value: '$21,430', helper: '8 invoices due this week' },
-  { label: 'Payables', value: '$7,860', helper: '3 supplier payments scheduled' }
-];
+const cashflowItems = computed(() => [
+  { label: 'Cash in bank', value: formatCurrency(124800), helper: 'Healthy runway for 4.2 months' },
+  { label: 'Receivables', value: formatCurrency(21430), helper: '8 invoices due this week' },
+  { label: 'Payables', value: formatCurrency(7860), helper: '3 supplier payments scheduled' }
+]);
 
 const recentActivity = [
   { title: 'VAT return ready for review', time: 'Today, 09:20', tone: 'bg-blue-50 text-blue-700' },
@@ -129,9 +149,23 @@ const createProcess = async () => {
   }
 };
 
-const logout = () => {
-  localStorage.removeItem('currentUser');
+const logout = async () => {
+  await signOutCurrentUser();
   router.push('/login');
+};
+
+const loadCurrencyPreferences = async () => {
+  preferredCurrency.value = getPreferredCurrency(currentUser.value?.user_id);
+
+  try {
+    exchangeRatePayload.value = await fetchExchangeRates();
+  } catch {
+    exchangeRatePayload.value = null;
+  }
+};
+
+const handleSettingsUpdated = () => {
+  void loadCurrencyPreferences();
 };
 
 onMounted(async () => {
@@ -143,7 +177,15 @@ onMounted(async () => {
   }
 
   currentUser.value = JSON.parse(savedUser);
+  await loadCurrencyPreferences();
   await loadProcesses();
+  window.addEventListener('finflow-settings-updated', handleSettingsUpdated);
+  window.addEventListener('storage', handleSettingsUpdated);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('finflow-settings-updated', handleSettingsUpdated);
+  window.removeEventListener('storage', handleSettingsUpdated);
 });
 </script>
 
@@ -168,6 +210,9 @@ onMounted(async () => {
             </h1>
             <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               Monitor revenue, spending, invoice health, and workflow activity from one bookkeeping workspace.
+            </p>
+            <p class="mt-3 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+              {{ exchangeRateNote }}
             </p>
           </div>
 

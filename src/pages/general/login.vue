@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { supabase } from '@/lib/supabase';
+import { syncAuthenticatedUser } from '@/utils/auth-session';
 
 // --- STYLING CONSTANTS ---
 const inputStyles = "w-full px-4 py-3 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-4 focus:ring-blue-50 focus:border-blue-600 transition-all placeholder:text-slate-300";
@@ -16,7 +18,6 @@ const isSubmitting = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 const router = useRouter();
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 // --- METHODS ---
 const handleLogin = async () => {
@@ -25,25 +26,21 @@ const handleLogin = async () => {
     isSubmitting.value = true;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                email: email.value.trim(),
-                password: password.value
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || 'Login failed.');
+        if (!supabase) {
+            throw new Error('Supabase is not configured. Add your Supabase URL and publishable key.');
         }
 
-        const displayName = data.user.full_name || data.user.business_name || data.user.email;
-        localStorage.setItem('currentUser', JSON.stringify(data.user));
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: email.value.trim(),
+            password: password.value
+        });
+
+        if (error) {
+            throw error;
+        }
+
+        const syncedUser = await syncAuthenticatedUser(data.session?.access_token);
+        const displayName = syncedUser.full_name || syncedUser.business_name || syncedUser.email;
         successMessage.value = `Welcome back, ${displayName}.`;
         email.value = '';
         password.value = '';
@@ -58,8 +55,52 @@ const handleLogin = async () => {
     }
 };
 
-const loginWithGoogle = () => console.log('Google login');
-const loginWithMicrosoft = () => console.log('Microsoft login');
+const loginWithGoogle = async () => {
+    errorMessage.value = '';
+
+    try {
+        if (!supabase) {
+            throw new Error('Supabase is not configured. Add your Supabase URL and publishable key.');
+        }
+
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: `${window.location.origin}/dashboard`
+            }
+        });
+
+        if (error) {
+            throw error;
+        }
+    } catch (error) {
+        errorMessage.value = error.message;
+    }
+};
+
+const loginWithMicrosoft = async () => {
+    errorMessage.value = '';
+
+    try {
+        if (!supabase) {
+            throw new Error('Supabase is not configured. Add your Supabase URL and publishable key.');
+        }
+
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'azure',
+            options: {
+                redirectTo: `${window.location.origin}/dashboard`
+            }
+        });
+
+        if (error) {
+            throw error;
+        }
+    } catch (error) {
+        errorMessage.value = error.message;
+    }
+};
+
 const togglePassword = () => { showPassword.value = !showPassword.value; };
 </script>
 
